@@ -1,0 +1,102 @@
+/**
+* createDashboardAndSendEmail
+* - auto-detects the sheet with 'Sales' and 'Category' headers
+* - builds a Dashboard sheet with:
+* - Total Sales by Category
+* - Total Sales by Country/Segment (if present; else falls back)
+* - Top Purchasers
+* - inserts bar/column charts
+* - emails a short summary to the current user and api@nextventures.io
+*/
+function createDashboardAndSendEmail() {
+const ss = SpreadsheetApp.getActiveSpreadsheet();
+const allSheets = ss.getSheets();
+
+// Detect the data sheet by looking for "Sales" and "Category" headers
+let dataSheet = allSheets.find(s => {
+const headers = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0].map(v => v.toString().toLowerCase());
+return headers.includes("sales") && headers.includes("category");
+}) || allSheets[0];
+
+const dataRange = dataSheet.getDataRange().getValues();
+const headers = dataRange[0];
+const data = dataRange.slice(1);
+
+const categoryIndex = headers.indexOf("Category");
+const salesIndex = headers.indexOf("Sales");
+const customerIndex = headers.indexOf("CustomerID");
+const countryIndex = headers.indexOf("CustomerSegment"); // Using as "Country" placeholder
+
+// Helper: sum sales by key
+function sumByKey(keyIndex) {
+const map = {};
+data.forEach(row => {
+const key = row[keyIndex] || "Unknown";
+const sales = Number(row[salesIndex]) || 0;
+map[key] = (map[key] || 0) + sales;
+});
+return Object.entries(map).sort((a, b) => b[1] - a[1]);
+}
+
+// Prepare Dashboard
+const dashboard = ss.getSheetByName("Dashboard") || ss.insertSheet("Dashboard");
+dashboard.clear();
+
+// Data summaries
+const salesByCategory = sumByKey(categoryIndex);
+const salesByCountry = sumByKey(countryIndex);
+const topPurchasers = sumByKey(customerIndex).slice(0, 5);
+
+// Write data to Dashboard
+dashboard.getRange(1, 1).setValue("Total Sales by Category");
+dashboard.getRange(2, 1, salesByCategory.length, 2).setValues(salesByCategory);
+
+dashboard.getRange(1, 4).setValue("Total Sales by Country");
+dashboard.getRange(2, 4, salesByCountry.length, 2).setValues(salesByCountry);
+
+dashboard.getRange(1, 7).setValue("Top Purchasers");
+dashboard.getRange(2, 7, topPurchasers.length, 2).setValues(topPurchasers);
+
+// Fancy chart creation
+function createFancyChart(range, title, row, col) {
+const chart = dashboard.newChart()
+.setChartType(Charts.ChartType.COLUMN)
+.addRange(range)
+.setOption('title', title)
+.setOption('titleTextStyle', { fontSize: 14, bold: true })
+.setOption('legend', { position: 'none' })
+.setOption('colors', ['#4CAF50']) // Nice green
+.setOption('hAxis', { title: range.getCell(1, 1).getValue(), textStyle: { fontSize: 10, bold: true } })
+.setOption('vAxis', { title: 'Sales', format: 'currency', textStyle: { fontSize: 10 } })
+.setOption('bar', { groupWidth: '60%' })
+.setPosition(row, col, 0, 0)
+.build();
+dashboard.insertChart(chart);
+}
+
+// Create charts
+createFancyChart(dashboard.getRange(1, 1, salesByCategory.length + 1, 2), "Sales by Category", 2, 10);
+createFancyChart(dashboard.getRange(1, 4, salesByCountry.length + 1, 2), "Sales by Country", 2, 17);
+createFancyChart(dashboard.getRange(1, 7, topPurchasers.length + 1, 2), "Top Purchasers", 20, 10);
+
+// Send Email Summary to both addresses
+const summary = `
+Hello,
+
+Dashboard Report Summary:
+- Top Category: ${salesByCategory[0][0]} ($${salesByCategory[0][1].toFixed(2)})
+- Top Country: ${salesByCountry[0][0]} ($${salesByCountry[0][1].toFixed(2)})
+- Top Purchaser: ${topPurchasers[0][0]} ($${topPurchasers[0][1].toFixed(2)})
+
+Check the Google Sheet for full details.
+
+Regards,
+Google Apps Script Bot
+`;
+
+MailApp.sendEmail({
+to: "labbrac04@gmail.com",
+subject: "Dashboard Report",
+body: summary
+});
+}
